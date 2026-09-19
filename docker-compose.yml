@@ -1,0 +1,10 @@
+# Optional: local Postgres so you can run the API without Neon.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hourhive
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"

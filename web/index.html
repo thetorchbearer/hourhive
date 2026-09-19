@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HourHive - trade skills for hours, not money</title>
+  <meta name="description" content="A community time bank. Teach what you know, learn what you want, pay in hours.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐝</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="banner" class="banner" hidden>
+    Waking up the free-tier server... first load can take up to a minute. Hang tight 🐝
+  </div>
+
+  <header class="top">
+    <a class="brand" href="#/">🐝 HourHive</a>
+    <nav id="nav">
+      <a href="#/" data-route="">Browse</a>
+      <a href="#/offer" data-route="offer">Offer a skill</a>
+      <a href="#/bookings" data-route="bookings">Sessions</a>
+      <a href="#/wallet" data-route="wallet">Wallet</a>
+      <a href="#/leaders" data-route="leaders">Top helpers</a>
+    </nav>
+    <div id="account" class="account"></div>
+  </header>
+
+  <main id="app" class="wrap"></main>
+
+  <dialog id="authDlg">
+    <form method="dialog" id="authForm">
+      <h2 id="authTitle">Join the hive</h2>
+      <p class="muted" id="authHint">New members start with 2 free hours.</p>
+      <label id="nameRow">Display name <input name="displayName" maxlength="60" autocomplete="nickname"></label>
+      <label>Email <input name="email" type="email" required autocomplete="email"></label>
+      <label>Password <input name="password" type="password" required minlength="8" autocomplete="current-password"></label>
+      <p id="authErr" class="err" hidden></p>
+      <div class="row">
+        <button type="submit" class="btn primary" id="authSubmit">Create account</button>
+        <button type="button" class="btn ghost" id="authSwitch">I already have an account</button>
+        <button type="button" class="btn ghost" id="authCancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reviewDlg">
+    <form method="dialog" id="reviewForm">
+      <h2>Rate this session</h2>
+      <label>Rating
+        <select name="rating">
+          <option value="5">★★★★★ Excellent</option>
+          <option value="4">★★★★ Great</option>
+          <option value="3">★★★ Okay</option>
+          <option value="2">★★ Poor</option>
+          <option value="1">★ Bad</option>
+        </select>
+      </label>
+      <label>Comment (optional) <textarea name="comment" maxlength="500" rows="3"></textarea></label>
+      <div class="row">
+        <button type="submit" class="btn primary">Send review</button>
+        <button type="button" class="btn ghost" id="reviewCancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

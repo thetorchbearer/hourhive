@@ -1,0 +1,16 @@
+# Render Blueprint - New > Blueprint > pick this repo. Free plan, no card needed.
+services:
+  - type: web
+    name: hourhive-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: ./api
+    healthCheckPath: /api/ping
+    envVars:
+      - key: DATABASE_URL        # Neon connection string (non-pooled)
+        sync: false
+      - key: ALLOWED_ORIGINS     # your Vercel URL, e.g. https://hourhive.vercel.app
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

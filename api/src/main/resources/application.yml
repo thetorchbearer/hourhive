@@ -1,0 +1,25 @@
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: hourhive
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jackson:
+    default-property-inclusion: non_null
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+hourhive:
+  # Neon: paste the (non-pooled) connection string, e.g. postgresql://user:pass@host/db?sslmode=require
+  database-url: ${DATABASE_URL:}
+  jwt-secret: ${JWT_SECRET:dev-only-secret-change-me-please-32chars-min}
+  token-ttl-hours: 72
+  # comma separated list, e.g. https://hourhive.vercel.app
+  allowed-origins: ${ALLOWED_ORIGINS:*}
+  signup-bonus-minutes: 120
