@@ -18,7 +18,7 @@
     <nav id="nav">
       <a href="#/" data-route="">Browse</a>
       <a href="#/offer" data-route="offer">Offer a skill</a>
-      <a href="#/bookings" data-route="bookings">Sessions</a>
+      <a href="#/bookings" data-route="bookings">Sessions <span id="badge" class="badge" hidden></span></a>
       <a href="#/wallet" data-route="wallet">Wallet</a>
       <a href="#/leaders" data-route="leaders">Top helpers</a>
     </nav>
@@ -60,6 +60,18 @@
         <button type="submit" class="btn primary">Send review</button>
         <button type="button" class="btn ghost" id="reviewCancel">Cancel</button>
       </div>
+    </form>
+  </dialog>
+
+  <dialog id="chatDlg" class="chat">
+    <div class="row" style="justify-content:space-between">
+      <h2 id="chatTitle">Messages</h2>
+      <button type="button" class="btn ghost" id="chatClose">Close</button>
+    </div>
+    <div id="chatLog" class="chatlog"></div>
+    <form id="chatForm" class="row" style="flex-wrap:nowrap">
+      <input name="body" maxlength="1000" placeholder="Write a message…" autocomplete="off" required>
+      <button type="submit" class="btn primary">Send</button>
     </form>
   </dialog>
 

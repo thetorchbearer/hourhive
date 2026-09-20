@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Instant;
+import java.util.List;
 
 public final class Dtos {
     private Dtos() {
@@ -65,5 +66,27 @@ public final class Dtos {
     }
 
     public record CategoryCount(String category, int listings) {
+    }
+
+    public record MessageRequest(@NotBlank @Size(max = 1000) String body) {
+    }
+
+    public record MessageView(long id, long senderId, String senderName, String body, Instant createdAt) {
+    }
+
+    public record ReviewView(long id, String reviewerName, int rating, String comment,
+                             String listingTitle, Instant createdAt) {
+    }
+
+    public record ProfileView(
+            long id, String displayName, String bio, double rating, int reviewCount,
+            int minutesGiven, int sessions, Instant memberSince,
+            List<ListingView> listings, List<ReviewView> reviews) {
+    }
+
+    public record CommunityStats(int members, int activeListings, int completedSessions, int minutesExchanged) {
+    }
+
+    public record MeSummary(int pendingRequests, int acceptedSessions) {
     }
 }

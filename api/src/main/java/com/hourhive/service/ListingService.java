@@ -50,7 +50,7 @@ public class ListingService {
         return get(id);
     }
 
-    public List<ListingView> search(String q, String category) {
+    public List<ListingView> search(String q, String category, String sort, Integer maxMinutes) {
         StringBuilder sql = new StringBuilder(SELECT).append(" where l.active = true");
         Map<String, Object> params = new HashMap<>();
         if (category != null && !category.isBlank()) {
@@ -61,8 +61,42 @@ public class ListingService {
             sql.append(" and (lower(l.title) like :q or lower(l.description) like :q)");
             params.put("q", "%" + q.trim().toLowerCase(Locale.ROOT) + "%");
         }
-        sql.append(" order by l.created_at desc limit 60");
+        if (maxMinutes != null && maxMinutes > 0) {
+            sql.append(" and l.minutes <= :maxm");
+            params.put("maxm", maxMinutes);
+        }
+        String order = switch (sort == null ? "" : sort) {
+            case "rating" -> " order by coalesce(r.avg_rating, 0) desc, r.cnt desc nulls last, l.created_at desc";
+            case "shortest" -> " order by l.minutes asc, l.created_at desc";
+            default -> " order by l.created_at desc";
+        };
+        sql.append(order).append(" limit 60");
         return jdbc.sql(sql.toString()).params(params).query(ListingService::map).list();
+    }
+
+    public List<ListingView> activeByOwner(long ownerId) {
+        return jdbc.sql(SELECT + " where l.owner_id = :o and l.active = true order by l.created_at desc")
+                .param("o", ownerId)
+                .query(ListingService::map)
+                .list();
+    }
+
+    public ListingView update(long ownerId, long id, ListingRequest req) {
+        ListingView existing = get(id);
+        if (existing.ownerId() != ownerId) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "You can only edit your own listings");
+        }
+        jdbc.sql("""
+                update listings set category = :c, title = :t, description = :d, minutes = :m
+                where id = :id
+                """)
+                .param("c", req.category().trim())
+                .param("t", req.title().trim())
+                .param("d", req.description().trim())
+                .param("m", req.minutes())
+                .param("id", id)
+                .update();
+        return get(id);
     }
 
     public List<ListingView> mine(long ownerId) {

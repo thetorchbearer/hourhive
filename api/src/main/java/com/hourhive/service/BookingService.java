@@ -2,6 +2,7 @@ package com.hourhive.service;
 
 import com.hourhive.api.Dtos.BookingRequest;
 import com.hourhive.api.Dtos.BookingView;
+import com.hourhive.api.Dtos.MeSummary;
 import com.hourhive.api.Dtos.ReviewRequest;
 import com.hourhive.error.ApiException;
 import java.util.List;
@@ -166,6 +167,17 @@ public class BookingService {
                 .param("u", userId)
                 .query((rs, n) -> map(rs))
                 .list();
+    }
+
+    public MeSummary summary(long userId) {
+        return jdbc.sql("""
+                select count(*) filter (where provider_id = :u and status = 'REQUESTED') as pending,
+                       count(*) filter (where status = 'ACCEPTED') as accepted
+                from bookings where learner_id = :u or provider_id = :u
+                """)
+                .param("u", userId)
+                .query((rs, n) -> new MeSummary((int) rs.getLong("pending"), (int) rs.getLong("accepted")))
+                .single();
     }
 
     public BookingView get(long id, long userId) {

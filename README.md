@@ -22,6 +22,15 @@ Runs **100% on free tiers** - no credit card required.
   keep-alive, cold-start banner + retry logic in the UI, JVM flags tuned for 512 MB.
 - **No JWT library** - small HMAC-signed stateless tokens; BCrypt passwords; per-IP rate limit on auth routes.
 
+## Features
+
+- Skill listings with search, category chips, sort (newest / top rated / shortest) and max-length filter
+- Escrowed time-credit bookings: request, accept, decline, cancel, complete
+- Per-booking message thread so learner and provider can agree on a time
+- Public member profiles with bio, reputation, active listings and reviews; editable "Your profile" page
+- Edit or remove your own listings
+- Pending-request badge on Sessions, community stats on the home page, Top helpers leaderboard
+
 ## Deploy (about 10 minutes)
 
 ### 1. Neon (database)
@@ -56,6 +65,9 @@ cd web && npx serve .           # http://localhost:3000  (config.js auto-targets
 `POST /api/auth/register|login` · `GET|PUT /api/me` · `GET /api/me/ledger` ·
 `GET|POST /api/listings` · `GET /api/listings/mine` · `DELETE /api/listings/{id}` ·
 `POST /api/bookings` · `GET /api/bookings/mine` · `POST /api/bookings/{id}/accept|decline|cancel|complete|review` ·
+`PUT /api/listings/{id}` · `GET /api/listings?q=&category=&sort=newest|rating|shortest&maxMinutes=` ·
+`GET /api/users/{id}` (public profile + reviews) · `GET|POST /api/bookings/{id}/messages` ·
+`GET /api/me/summary` · `GET /api/stats` ·
 `GET /api/leaderboard` · `GET /api/categories` · `GET /api/ping` · `GET /api/health`
 
 ## Free-tier notes

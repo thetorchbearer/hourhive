@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,8 +31,10 @@ public class ListingController {
 
     @GetMapping
     public List<ListingView> search(@RequestParam(required = false) String q,
-                                    @RequestParam(required = false) String category) {
-        return listings.search(q, category);
+                                    @RequestParam(required = false) String category,
+                                    @RequestParam(required = false) String sort,
+                                    @RequestParam(required = false) Integer maxMinutes) {
+        return listings.search(q, category, sort, maxMinutes);
     }
 
     @GetMapping("/mine")
@@ -49,6 +52,13 @@ public class ListingController {
     public ListingView create(@RequestAttribute(value = Auth.ATTR, required = false) Long uid,
                               @Valid @RequestBody ListingRequest req) {
         return listings.create(Auth.require(uid), req);
+    }
+
+    @PutMapping("/{id}")
+    public ListingView update(@RequestAttribute(value = Auth.ATTR, required = false) Long uid,
+                              @PathVariable long id,
+                              @Valid @RequestBody ListingRequest req) {
+        return listings.update(Auth.require(uid), id, req);
     }
 
     @DeleteMapping("/{id}")
