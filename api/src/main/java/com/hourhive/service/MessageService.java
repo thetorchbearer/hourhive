@@ -15,9 +15,11 @@ public class MessageService {
     private static final int MAX_MESSAGES_PER_BOOKING = 300;
 
     private final JdbcClient jdbc;
+    private final NotificationService notifications;
 
-    public MessageService(JdbcClient jdbc) {
+    public MessageService(JdbcClient jdbc, NotificationService notifications) {
         this.jdbc = jdbc;
+        this.notifications = notifications;
     }
 
     public List<MessageView> list(long userId, long bookingId) {
@@ -35,7 +37,7 @@ public class MessageService {
     }
 
     public MessageView send(long userId, long bookingId, MessageRequest req) {
-        requireParticipant(userId, bookingId);
+        long[] parties = requireParticipant(userId, bookingId);
         Long count = jdbc.sql("select count(*) from booking_messages where booking_id = :b")
                 .param("b", bookingId).query(Long.class).single();
         if (count >= MAX_MESSAGES_PER_BOOKING) {
@@ -50,6 +52,8 @@ public class MessageService {
                 .param("t", req.body().trim())
                 .query(Long.class)
                 .single();
+        long other = parties[0] == userId ? parties[1] : parties[0];
+        notifications.notify(other, "NEW_MESSAGE", "You have a new message about a booking", "#/bookings");
         return jdbc.sql("""
                 select m.id, m.sender_id, u.display_name, m.body, m.created_at
                 from booking_messages m join users u on u.id = m.sender_id
@@ -62,7 +66,7 @@ public class MessageService {
                 .single();
     }
 
-    private void requireParticipant(long userId, long bookingId) {
+    private long[] requireParticipant(long userId, long bookingId) {
         record P(long learner, long provider) {
         }
         P p = jdbc.sql("select learner_id, provider_id from bookings where id = :id")
@@ -73,5 +77,6 @@ public class MessageService {
         if (p.learner() != userId && p.provider() != userId) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Not your booking");
         }
+        return new long[] {p.learner(), p.provider()};
     }
 }

@@ -17,6 +17,7 @@
     <a class="brand" href="#/">🐝 HourHive</a>
     <nav id="nav">
       <a href="#/" data-route="">Browse</a>
+      <a href="#/requests" data-route="requests">Requests</a>
       <a href="#/offer" data-route="offer">Offer a skill</a>
       <a href="#/bookings" data-route="bookings">Sessions <span id="badge" class="badge" hidden></span></a>
       <a href="#/wallet" data-route="wallet">Wallet</a>
@@ -72,6 +73,35 @@
     <form id="chatForm" class="row" style="flex-wrap:nowrap">
       <input name="body" maxlength="1000" placeholder="Write a message…" autocomplete="off" required>
       <button type="submit" class="btn primary">Send</button>
+    </form>
+  </dialog>
+
+  <dialog id="bookDlg">
+    <form method="dialog" id="bookForm">
+      <h2 id="bookTitle">Book session</h2>
+      <p class="muted" id="bookHint"></p>
+      <label id="noteRow">Note for the provider (optional) <textarea name="note" maxlength="500" rows="3"></textarea></label>
+      <label>Preferred time (your local time) <input type="datetime-local" name="when"></label>
+      <p class="muted" id="slotHint"></p>
+      <p id="bookErr" class="err" hidden></p>
+      <div class="row">
+        <button type="submit" class="btn primary" id="bookSubmit">Request session</button>
+        <button type="button" class="btn ghost" id="bookCancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="reportDlg">
+    <form method="dialog" id="reportForm">
+      <h2>Report</h2>
+      <label>Reason
+        <select name="reason"><option>Spam</option><option>Inappropriate content</option><option>Harassment</option><option>Scam or fraud</option><option>Other</option></select>
+      </label>
+      <label>Details (optional) <textarea name="details" maxlength="500" rows="3"></textarea></label>
+      <div class="row">
+        <button type="submit" class="btn primary">Send report</button>
+        <button type="button" class="btn ghost" id="reportCancel">Cancel</button>
+      </div>
     </form>
   </dialog>
 

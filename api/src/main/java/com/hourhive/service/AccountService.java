@@ -56,28 +56,32 @@ public class AccountService {
 
     public AuthResponse login(LoginRequest req) {
         String email = req.email().trim().toLowerCase(Locale.ROOT);
-        record Row(long id, String hash) {
+        record Row(long id, String hash, boolean disabled) {
         }
-        Row row = jdbc.sql("select id, password_hash from users where email = :e")
+        Row row = jdbc.sql("select id, password_hash, disabled from users where email = :e")
                 .param("e", email)
-                .query((rs, n) -> new Row(rs.getLong("id"), rs.getString("password_hash")))
+                .query((rs, n) -> new Row(rs.getLong("id"), rs.getString("password_hash"), rs.getBoolean("disabled")))
                 .optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Wrong email or password"));
         if (!encoder.matches(req.password(), row.hash())) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Wrong email or password");
         }
+        if (row.disabled()) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "This account has been suspended", "ACCOUNT_SUSPENDED");
+        }
         return new AuthResponse(tokens.issue(row.id()), view(row.id()));
     }
 
     public UserView view(long userId) {
-        return jdbc.sql("select id, email, display_name, bio from users where id = :id")
+        return jdbc.sql("select id, email, display_name, bio, role from users where id = :id")
                 .param("id", userId)
                 .query((rs, n) -> new UserView(
                         rs.getLong("id"),
                         rs.getString("email"),
                         rs.getString("display_name"),
                         rs.getString("bio"),
-                        ledger.balance(userId)))
+                        ledger.balance(userId),
+                        rs.getString("role")))
                 .optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account no longer exists"));
     }

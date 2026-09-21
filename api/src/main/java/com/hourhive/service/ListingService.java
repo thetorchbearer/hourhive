@@ -99,6 +99,14 @@ public class ListingService {
         return get(id);
     }
 
+    /** Active listings from other members, used by the helper-matching engine. */
+    public List<ListingView> candidates(long excludeOwnerId) {
+        return jdbc.sql(SELECT + " where l.active = true and l.owner_id <> :o order by l.created_at desc limit 300")
+                .param("o", excludeOwnerId)
+                .query(ListingService::map)
+                .list();
+    }
+
     public List<ListingView> mine(long ownerId) {
         return jdbc.sql(SELECT + " where l.owner_id = :o order by l.created_at desc")
                 .param("o", ownerId)

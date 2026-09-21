@@ -2,6 +2,7 @@ package com.hourhive.web;
 
 import com.hourhive.api.Dtos.BookingRequest;
 import com.hourhive.api.Dtos.BookingView;
+import com.hourhive.api.Dtos.RescheduleRequest;
 import com.hourhive.api.Dtos.ReviewRequest;
 import com.hourhive.security.Auth;
 import com.hourhive.service.BookingService;
@@ -61,6 +62,13 @@ public class BookingController {
     public BookingView complete(@RequestAttribute(value = Auth.ATTR, required = false) Long uid,
                                 @PathVariable long id) {
         return bookings.complete(Auth.require(uid), id);
+    }
+
+    @PostMapping("/{id}/reschedule")
+    public BookingView reschedule(@RequestAttribute(value = Auth.ATTR, required = false) Long uid,
+                                  @PathVariable long id,
+                                  @Valid @RequestBody RescheduleRequest req) {
+        return bookings.reschedule(Auth.require(uid), id, req.scheduledAt());
     }
 
     @PostMapping("/{id}/review")

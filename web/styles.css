@@ -72,3 +72,12 @@ a.plain:hover { text-decoration: underline; }
 .msg.me { background: var(--honey); color: #2b1d00; align-self: flex-end; }
 .msg small { display: block; opacity: .65; font-size: .7rem; }
 #chatForm input { flex: 1; }
+.bell { position: relative; text-decoration: none; }
+.bell .badge { position: absolute; top: -8px; right: -10px; margin: 0; }
+.notif { text-decoration: none; color: inherit; }
+.notif.unread { border-left: 4px solid var(--honey); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--honey); }
+.small { padding: 3px 9px; font-size: .8rem; }
+.numbers { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.numbers .card b { font-size: 1.8rem; }
+.match { border-top: 1px solid var(--line); padding: 8px 0; display: flex; gap: 10px; justify-content: space-between; flex-wrap: wrap; align-items: center; }

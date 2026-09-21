@@ -5,6 +5,10 @@ import com.hourhive.api.Dtos.BookingView;
 import com.hourhive.api.Dtos.MeSummary;
 import com.hourhive.api.Dtos.ReviewRequest;
 import com.hourhive.error.ApiException;
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -24,7 +28,8 @@ public class BookingService {
     private static final String SELECT = """
             select b.id, b.listing_id, l.title, b.learner_id, lu.display_name as learner_name,
                    b.provider_id, pu.display_name as provider_name, b.minutes, b.status, b.note,
-                   (rv.id is not null) as reviewed, b.created_at, b.updated_at
+                   (rv.id is not null) as reviewed, b.created_at, b.updated_at,
+                   b.scheduled_at, b.reschedule_count
             from bookings b
             join listings l on l.id = b.listing_id
             join users lu on lu.id = b.learner_id
@@ -37,10 +42,17 @@ public class BookingService {
 
     private final JdbcClient jdbc;
     private final LedgerService ledger;
+    private final AvailabilityService availability;
+    private final NotificationService notifications;
+    private final AuditService audit;
 
-    public BookingService(JdbcClient jdbc, LedgerService ledger) {
+    public BookingService(JdbcClient jdbc, LedgerService ledger, AvailabilityService availability,
+                          NotificationService notifications, AuditService audit) {
         this.jdbc = jdbc;
         this.ledger = ledger;
+        this.availability = availability;
+        this.notifications = notifications;
+        this.audit = audit;
     }
 
     @Transactional
@@ -77,19 +89,27 @@ public class BookingService {
         if (open > 0) {
             throw new ApiException(HttpStatus.CONFLICT, "You already have an open booking for this listing");
         }
+        Instant when = req.scheduledAt();
+        if (when != null) {
+            validateSchedule(listing.ownerId(), learnerId, listing.minutes(), when, 0L);
+        }
 
         long id = jdbc.sql("""
-                insert into bookings (listing_id, learner_id, provider_id, minutes, status, note)
-                values (:l, :lr, :p, :m, 'REQUESTED', :n) returning id
+                insert into bookings (listing_id, learner_id, provider_id, minutes, status, note, scheduled_at)
+                values (:l, :lr, :p, :m, 'REQUESTED', :n, :s) returning id
                 """)
                 .param("l", req.listingId())
                 .param("lr", learnerId)
                 .param("p", listing.ownerId())
                 .param("m", listing.minutes())
                 .param("n", req.note())
+                .param("s", when == null ? null : Timestamp.from(when))
                 .query(Long.class)
                 .single();
         ledger.append(learnerId, -listing.minutes(), "ESCROW", id, "Held for: " + listing.title());
+        notifications.notify(listing.ownerId(), "BOOKING_REQUESTED",
+                "New booking request for \"" + listing.title() + "\"", "#/bookings");
+        audit.record(learnerId, "BOOKING_REQUESTED", "booking", id, listing.title());
         return get(id, learnerId);
     }
 
@@ -99,6 +119,8 @@ public class BookingService {
         requireProvider(b, userId);
         requireStatus(b, "REQUESTED");
         setStatus(id, "ACCEPTED");
+        notifications.notify(b.learnerId(), "BOOKING_ACCEPTED", "Your booking was accepted", "#/bookings");
+        audit.record(userId, "BOOKING_ACCEPTED", "booking", id, null);
         return get(id, userId);
     }
 
@@ -109,6 +131,9 @@ public class BookingService {
         requireStatus(b, "REQUESTED");
         setStatus(id, "DECLINED");
         refund(b, "Declined: " + title(b.listingId()));
+        notifications.notify(b.learnerId(), "BOOKING_DECLINED",
+                "Your booking was declined and your minutes were refunded", "#/bookings");
+        audit.record(userId, "BOOKING_DECLINED", "booking", id, null);
         return get(id, userId);
     }
 
@@ -126,6 +151,9 @@ public class BookingService {
         }
         setStatus(id, "CANCELLED");
         refund(b, "Cancelled: " + title(b.listingId()));
+        long other = learner ? b.providerId() : b.learnerId();
+        notifications.notify(other, "BOOKING_CANCELLED", "A booking was cancelled", "#/bookings");
+        audit.record(userId, "BOOKING_CANCELLED", "booking", id, null);
         return get(id, userId);
     }
 
@@ -138,6 +166,43 @@ public class BookingService {
         requireStatus(b, "ACCEPTED");
         setStatus(id, "COMPLETED");
         ledger.append(b.providerId(), b.minutes(), "EARNED", id, "Session completed: " + title(b.listingId()));
+        notifications.notify(b.providerId(), "BOOKING_COMPLETED",
+                "Session completed. You earned " + b.minutes() + " minutes", "#/wallet");
+        audit.record(userId, "BOOKING_COMPLETED", "booking", id, null);
+        return get(id, userId);
+    }
+
+    /**
+     * Either participant can move an open session to a new time. If the learner moves an ACCEPTED session,
+     * it goes back to REQUESTED so the provider has to reconfirm. Escrow is untouched.
+     */
+    @Transactional
+    public BookingView reschedule(long userId, long id, Instant when) {
+        Row b = lock(id);
+        boolean learner = b.learnerId() == userId;
+        if (!learner && b.providerId() != userId) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Not your booking");
+        }
+        boolean open = b.status().equals("REQUESTED") || b.status().equals("ACCEPTED");
+        if (!open) {
+            throw new ApiException(HttpStatus.CONFLICT, "Only open bookings can be rescheduled");
+        }
+        validateSchedule(b.providerId(), b.learnerId(), b.minutes(), when, b.id());
+        boolean reconfirm = learner && b.status().equals("ACCEPTED");
+        jdbc.sql("""
+                update bookings
+                set scheduled_at = :s, reschedule_count = reschedule_count + 1, updated_at = now(),
+                    status = :st
+                where id = :id
+                """)
+                .param("s", Timestamp.from(when))
+                .param("st", reconfirm ? "REQUESTED" : b.status())
+                .param("id", id)
+                .update();
+        long other = learner ? b.providerId() : b.learnerId();
+        notifications.notify(other, "BOOKING_RESCHEDULED",
+                "A session was rescheduled" + (reconfirm ? ". Please reconfirm." : ""), "#/bookings");
+        audit.record(userId, "BOOKING_RESCHEDULED", "booking", id, when.toString());
         return get(id, userId);
     }
 
@@ -160,6 +225,8 @@ public class BookingService {
                 .param("b", id).param("r", userId).param("p", b.providerId())
                 .param("s", req.rating()).param("c", req.comment())
                 .update();
+        notifications.notify(b.providerId(), "REVIEW_RECEIVED",
+                "You received a " + req.rating() + "-star review", "#/u/" + b.providerId());
     }
 
     public List<BookingView> mine(long userId) {
@@ -193,6 +260,35 @@ public class BookingService {
     }
 
     // ---- helpers ----
+
+    /** Future time, inside the provider's availability, and free of clashes for both people. */
+    private void validateSchedule(long providerId, long learnerId, int minutes, Instant when, long excludeId) {
+        Instant now = Instant.now();
+        if (!when.isAfter(now.plus(5, ChronoUnit.MINUTES))) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Pick a time in the future", "INVALID_TIME");
+        }
+        if (when.isAfter(now.plus(Duration.ofDays(180)))) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Sessions can be booked up to 180 days ahead",
+                    "INVALID_TIME");
+        }
+        availability.requireWithin(providerId, when, minutes);
+        Instant end = when.plus(minutes, ChronoUnit.MINUTES);
+        Long clashes = jdbc.sql("""
+                select count(*) from bookings
+                where status in ('REQUESTED', 'ACCEPTED') and scheduled_at is not null
+                  and (provider_id in (:p, :l) or learner_id in (:p, :l))
+                  and id <> :ex
+                  and scheduled_at < :endts
+                  and scheduled_at + (minutes * interval '1 minute') > :startts
+                """)
+                .param("p", providerId).param("l", learnerId).param("ex", excludeId)
+                .param("startts", Timestamp.from(when)).param("endts", Timestamp.from(end))
+                .query(Long.class).single();
+        if (clashes > 0) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "That time overlaps another session for you or the provider", "SCHEDULE_CONFLICT");
+        }
+    }
 
     private Row lock(long id) {
         return jdbc.sql("""
@@ -234,6 +330,7 @@ public class BookingService {
     }
 
     private static BookingView map(java.sql.ResultSet rs) throws java.sql.SQLException {
+        Timestamp sched = rs.getTimestamp("scheduled_at");
         return new BookingView(
                 rs.getLong("id"), rs.getLong("listing_id"), rs.getString("title"),
                 rs.getLong("learner_id"), rs.getString("learner_name"),
@@ -241,6 +338,8 @@ public class BookingService {
                 rs.getInt("minutes"), rs.getString("status"), rs.getString("note"),
                 rs.getBoolean("reviewed"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant());
+                rs.getTimestamp("updated_at").toInstant(),
+                sched == null ? null : sched.toInstant(),
+                rs.getInt("reschedule_count"));
     }
 }

@@ -31,6 +31,14 @@ Runs **100% on free tiers** - no credit card required.
 - Edit or remove your own listings
 - Pending-request badge on Sessions, community stats on the home page, Top helpers leaderboard
 
+### Phase 1 (platform basics)
+
+- **Skill requests board** with **helper matching** (category + keyword + rating scoring; top matches get notified)
+- **Weekly availability** slots (UTC) and **scheduled bookings** with **rescheduling** and **overlap prevention**
+- **In-app notifications** (bell + inbox) for bookings, messages, reviews and matching requests
+- **RBAC** (USER / MODERATOR / ADMIN), **admin dashboard**, **user & listing reports** with moderation actions, **audit log**
+- First admin: set `ADMIN_BOOTSTRAP_SECRET` on Render, sign in, open *Your profile → Admin access*. Works only while no admin exists.
+
 ## Deploy (about 10 minutes)
 
 ### 1. Neon (database)
