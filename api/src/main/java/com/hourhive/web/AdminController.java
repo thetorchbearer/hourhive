@@ -5,6 +5,7 @@ import com.hourhive.api.Dtos.AdminUserView;
 import com.hourhive.api.Dtos.AuditView;
 import com.hourhive.api.Dtos.BootstrapRequest;
 import com.hourhive.api.Dtos.FlagRequest;
+import com.hourhive.api.Dtos.LedgerReport;
 import com.hourhive.api.Dtos.PageResponse;
 import com.hourhive.api.Dtos.RoleRequest;
 import com.hourhive.domain.Role;
@@ -81,6 +82,12 @@ public class AdminController {
         roles.require(me, Role.ADMIN);
         admin.setSuspended(me, id, req.value());
         return Map.of("ok", true);
+    }
+
+    @GetMapping("/api/admin/ledger/verify")
+    public LedgerReport verifyLedger(@RequestAttribute(value = Auth.ATTR, required = false) Long uid) {
+        roles.require(Auth.require(uid), Role.ADMIN);
+        return admin.verifyLedger();
     }
 
     @GetMapping("/api/admin/audit")

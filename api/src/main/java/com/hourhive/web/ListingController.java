@@ -1,6 +1,7 @@
 package com.hourhive.web;
 
 import com.hourhive.api.Dtos.ListingRequest;
+import com.hourhive.api.Dtos.PageResponse;
 import com.hourhive.api.Dtos.ListingView;
 import com.hourhive.security.Auth;
 import com.hourhive.service.ListingService;
@@ -30,11 +31,17 @@ public class ListingController {
     }
 
     @GetMapping
-    public List<ListingView> search(@RequestParam(required = false) String q,
-                                    @RequestParam(required = false) String category,
-                                    @RequestParam(required = false) String sort,
-                                    @RequestParam(required = false) Integer maxMinutes) {
-        return listings.search(q, category, sort, maxMinutes);
+    public PageResponse<ListingView> search(@RequestParam(required = false) String q,
+                                            @RequestParam(required = false) String category,
+                                            @RequestParam(required = false) String sort,
+                                            @RequestParam(required = false) Integer minMinutes,
+                                            @RequestParam(required = false) Integer maxMinutes,
+                                            @RequestParam(required = false) Double minRating,
+                                            @RequestParam(required = false) Integer availableDay,
+                                            @RequestParam(defaultValue = "0") int page,
+                                            @RequestParam(defaultValue = "24") int size) {
+        return listings.search(new ListingService.SearchQuery(
+                q, category, sort, minMinutes, maxMinutes, minRating, availableDay, page, size));
     }
 
     @GetMapping("/mine")

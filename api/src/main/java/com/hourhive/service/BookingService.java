@@ -4,6 +4,7 @@ import com.hourhive.api.Dtos.BookingRequest;
 import com.hourhive.api.Dtos.BookingView;
 import com.hourhive.api.Dtos.MeSummary;
 import com.hourhive.api.Dtos.ReviewRequest;
+import com.hourhive.domain.BookingStatus;
 import com.hourhive.error.ApiException;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -37,7 +38,8 @@ public class BookingService {
             left join reviews rv on rv.booking_id = b.id
             """;
 
-    private record Row(long id, long listingId, long learnerId, long providerId, int minutes, String status) {
+    private record Row(long id, long listingId, long learnerId, long providerId, int minutes,
+                       BookingStatus status) {
     }
 
     private final JdbcClient jdbc;
@@ -56,11 +58,26 @@ public class BookingService {
     }
 
     @Transactional
-    public BookingView request(long learnerId, BookingRequest req) {
-        // Serialise balance checks per learner so two parallel requests can't overspend.
+    public BookingView request(long learnerId, BookingRequest req, String idempotencyKey) {
+        // Serialise everything for this learner so two parallel requests can't overspend or double-book.
         jdbc.sql("select id from users where id = :id for update").param("id", learnerId)
                 .query(Long.class).optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account no longer exists"));
+
+        String key = idempotencyKey == null ? "" : idempotencyKey.trim();
+        if (key.length() > 80) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Idempotency-Key is too long", "VALIDATION_FAILED");
+        }
+        if (!key.isEmpty()) {
+            Long existing = jdbc.sql("select booking_id from idempotency_keys where user_id = :u and idem_key = :k")
+                    .param("u", learnerId).param("k", key)
+                    .query(Long.class).optional().orElse(null);
+            if (existing != null) {
+                // Same key seen before (e.g. a retried or double-clicked request): return the original booking
+                // instead of creating a second one.
+                return get(existing, learnerId);
+            }
+        }
 
         record L(long ownerId, int minutes, boolean active, String title) {
         }
@@ -107,6 +124,10 @@ public class BookingService {
                 .query(Long.class)
                 .single();
         ledger.append(learnerId, -listing.minutes(), "ESCROW", id, "Held for: " + listing.title());
+        if (!key.isEmpty()) {
+            jdbc.sql("insert into idempotency_keys (user_id, idem_key, booking_id) values (:u, :k, :b)")
+                    .param("u", learnerId).param("k", key).param("b", id).update();
+        }
         notifications.notify(listing.ownerId(), "BOOKING_REQUESTED",
                 "New booking request for \"" + listing.title() + "\"", "#/bookings");
         audit.record(learnerId, "BOOKING_REQUESTED", "booking", id, listing.title());
@@ -117,8 +138,7 @@ public class BookingService {
     public BookingView accept(long userId, long id) {
         Row b = lock(id);
         requireProvider(b, userId);
-        requireStatus(b, "REQUESTED");
-        setStatus(id, "ACCEPTED");
+        transition(b, BookingStatus.ACCEPTED);
         notifications.notify(b.learnerId(), "BOOKING_ACCEPTED", "Your booking was accepted", "#/bookings");
         audit.record(userId, "BOOKING_ACCEPTED", "booking", id, null);
         return get(id, userId);
@@ -128,8 +148,7 @@ public class BookingService {
     public BookingView decline(long userId, long id) {
         Row b = lock(id);
         requireProvider(b, userId);
-        requireStatus(b, "REQUESTED");
-        setStatus(id, "DECLINED");
+        transition(b, BookingStatus.DECLINED);
         refund(b, "Declined: " + title(b.listingId()));
         notifications.notify(b.learnerId(), "BOOKING_DECLINED",
                 "Your booking was declined and your minutes were refunded", "#/bookings");
@@ -141,15 +160,10 @@ public class BookingService {
     public BookingView cancel(long userId, long id) {
         Row b = lock(id);
         boolean learner = b.learnerId() == userId;
-        boolean provider = b.providerId() == userId;
-        if (!learner && !provider) {
+        if (!learner && b.providerId() != userId) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Not your booking");
         }
-        boolean open = b.status().equals("REQUESTED") || b.status().equals("ACCEPTED");
-        if (!open) {
-            throw new ApiException(HttpStatus.CONFLICT, "This booking can no longer be cancelled");
-        }
-        setStatus(id, "CANCELLED");
+        transition(b, BookingStatus.CANCELLED);
         refund(b, "Cancelled: " + title(b.listingId()));
         long other = learner ? b.providerId() : b.learnerId();
         notifications.notify(other, "BOOKING_CANCELLED", "A booking was cancelled", "#/bookings");
@@ -163,8 +177,7 @@ public class BookingService {
         if (b.learnerId() != userId) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Only the learner can confirm a finished session");
         }
-        requireStatus(b, "ACCEPTED");
-        setStatus(id, "COMPLETED");
+        transition(b, BookingStatus.COMPLETED);
         ledger.append(b.providerId(), b.minutes(), "EARNED", id, "Session completed: " + title(b.listingId()));
         notifications.notify(b.providerId(), "BOOKING_COMPLETED",
                 "Session completed. You earned " + b.minutes() + " minutes", "#/wallet");
@@ -183,12 +196,15 @@ public class BookingService {
         if (!learner && b.providerId() != userId) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Not your booking");
         }
-        boolean open = b.status().equals("REQUESTED") || b.status().equals("ACCEPTED");
-        if (!open) {
+        if (!b.status().isOpen()) {
             throw new ApiException(HttpStatus.CONFLICT, "Only open bookings can be rescheduled");
         }
         validateSchedule(b.providerId(), b.learnerId(), b.minutes(), when, b.id());
-        boolean reconfirm = learner && b.status().equals("ACCEPTED");
+        boolean reconfirm = learner && b.status() == BookingStatus.ACCEPTED;
+        BookingStatus nextStatus = reconfirm ? BookingStatus.REQUESTED : b.status();
+        if (reconfirm && !b.status().canMoveTo(nextStatus)) {
+            throw new ApiException(HttpStatus.CONFLICT, "Can't reschedule from " + b.status());
+        }
         jdbc.sql("""
                 update bookings
                 set scheduled_at = :s, reschedule_count = reschedule_count + 1, updated_at = now(),
@@ -196,7 +212,7 @@ public class BookingService {
                 where id = :id
                 """)
                 .param("s", Timestamp.from(when))
-                .param("st", reconfirm ? "REQUESTED" : b.status())
+                .param("st", nextStatus.name())
                 .param("id", id)
                 .update();
         long other = learner ? b.providerId() : b.learnerId();
@@ -212,7 +228,10 @@ public class BookingService {
         if (b.learnerId() != userId) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Only the learner can review this session");
         }
-        requireStatus(b, "COMPLETED");
+        if (b.status() != BookingStatus.COMPLETED) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "Booking is " + b.status() + ", expected COMPLETED", "INVALID_STATE");
+        }
         Long existing = jdbc.sql("select count(*) from reviews where booking_id = :id")
                 .param("id", id).query(Long.class).single();
         if (existing > 0) {
@@ -298,7 +317,7 @@ public class BookingService {
                 .param("id", id)
                 .query((rs, n) -> new Row(rs.getLong("id"), rs.getLong("listing_id"),
                         rs.getLong("learner_id"), rs.getLong("provider_id"),
-                        rs.getInt("minutes"), rs.getString("status")))
+                        rs.getInt("minutes"), BookingStatus.valueOf(rs.getString("status"))))
                 .optional()
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Booking not found"));
     }
@@ -309,15 +328,14 @@ public class BookingService {
         }
     }
 
-    private void requireStatus(Row b, String expected) {
-        if (!b.status().equals(expected)) {
-            throw new ApiException(HttpStatus.CONFLICT, "Booking is " + b.status() + ", expected " + expected);
+    /** The only place a booking status changes outside reschedule(); always goes through the state machine. */
+    private void transition(Row b, BookingStatus next) {
+        if (!b.status().canMoveTo(next)) {
+            throw new ApiException(HttpStatus.CONFLICT,
+                    "Booking is " + b.status() + " and can't move to " + next, "INVALID_STATE");
         }
-    }
-
-    private void setStatus(long id, String status) {
         jdbc.sql("update bookings set status = :s, updated_at = now() where id = :id")
-                .param("s", status).param("id", id).update();
+                .param("s", next.name()).param("id", b.id()).update();
     }
 
     private void refund(Row b, String note) {

@@ -40,12 +40,15 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns(origins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .exposedHeaders("X-Request-Id", "X-Total-Count", "X-Total-Pages", "X-Page",
+                        "X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After")
                 .maxAge(3600);
     }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(rateLimitInterceptor).addPathPatterns("/api/auth/**");
+        // Auth first so the rate limiter can scope writes per signed-in user, not just per IP.
         registry.addInterceptor(authInterceptor).addPathPatterns("/api/**");
+        registry.addInterceptor(rateLimitInterceptor).addPathPatterns("/api/**");
     }
 }

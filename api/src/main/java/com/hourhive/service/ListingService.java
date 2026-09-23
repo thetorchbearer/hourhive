@@ -3,6 +3,7 @@ package com.hourhive.service;
 import com.hourhive.api.Dtos.CategoryCount;
 import com.hourhive.api.Dtos.ListingRequest;
 import com.hourhive.api.Dtos.ListingView;
+import com.hourhive.api.Dtos.PageResponse;
 import com.hourhive.error.ApiException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -50,28 +51,72 @@ public class ListingService {
         return get(id);
     }
 
-    public List<ListingView> search(String q, String category, String sort, Integer maxMinutes) {
-        StringBuilder sql = new StringBuilder(SELECT).append(" where l.active = true");
+    /** Search filters. Any field may be null/blank to skip that filter. */
+    public record SearchQuery(String q, String category, String sort, Integer minMinutes, Integer maxMinutes,
+                              Double minRating, Integer availableDay, int page, int size) {
+    }
+
+    public SearchQuery normalize(SearchQuery sq) {
+        int size = Math.min(Math.max(sq.size(), 1), 50);
+        int page = Math.max(sq.page(), 0);
+        return new SearchQuery(sq.q(), sq.category(), sq.sort(), sq.minMinutes(), sq.maxMinutes(),
+                sq.minRating(), sq.availableDay(), page, size);
+    }
+
+    public PageResponse<ListingView> search(SearchQuery raw) {
+        SearchQuery sq = normalize(raw);
+        StringBuilder where = new StringBuilder(" where l.active = true and u.disabled = false");
         Map<String, Object> params = new HashMap<>();
-        if (category != null && !category.isBlank()) {
-            sql.append(" and l.category = :cat");
-            params.put("cat", category.trim());
+        if (sq.category() != null && !sq.category().isBlank()) {
+            where.append(" and l.category = :cat");
+            params.put("cat", sq.category().trim());
         }
-        if (q != null && !q.isBlank()) {
-            sql.append(" and (lower(l.title) like :q or lower(l.description) like :q)");
-            params.put("q", "%" + q.trim().toLowerCase(Locale.ROOT) + "%");
+        if (sq.q() != null && !sq.q().isBlank()) {
+            where.append(" and (lower(l.title) like :q or lower(l.description) like :q or lower(l.category) like :q)");
+            params.put("q", "%" + sq.q().trim().toLowerCase(Locale.ROOT) + "%");
         }
-        if (maxMinutes != null && maxMinutes > 0) {
-            sql.append(" and l.minutes <= :maxm");
-            params.put("maxm", maxMinutes);
+        if (sq.minMinutes() != null && sq.minMinutes() > 0) {
+            where.append(" and l.minutes >= :minm");
+            params.put("minm", sq.minMinutes());
         }
-        String order = switch (sort == null ? "" : sort) {
+        if (sq.maxMinutes() != null && sq.maxMinutes() > 0) {
+            where.append(" and l.minutes <= :maxm");
+            params.put("maxm", sq.maxMinutes());
+        }
+        if (sq.minRating() != null && sq.minRating() > 0) {
+            where.append(" and coalesce(r.avg_rating, 0) >= :minr");
+            params.put("minr", sq.minRating());
+        }
+        if (sq.availableDay() != null && sq.availableDay() >= 1 && sq.availableDay() <= 7) {
+            where.append(" and exists (select 1 from availability_slots s"
+                    + " where s.user_id = l.owner_id and s.day_of_week = :day)");
+            params.put("day", sq.availableDay());
+        }
+        String order = switch (sq.sort() == null ? "" : sq.sort()) {
             case "rating" -> " order by coalesce(r.avg_rating, 0) desc, r.cnt desc nulls last, l.created_at desc";
             case "shortest" -> " order by l.minutes asc, l.created_at desc";
+            case "longest" -> " order by l.minutes desc, l.created_at desc";
+            case "oldest" -> " order by l.created_at asc";
             default -> " order by l.created_at desc";
         };
-        sql.append(order).append(" limit 60");
-        return jdbc.sql(sql.toString()).params(params).query(ListingService::map).list();
+
+        Long total = jdbc.sql("select count(*) from (" + SELECT + where + ") t")
+                .params(params).query(Long.class).single();
+        Map<String, Object> pageParams = new HashMap<>(params);
+        pageParams.put("lim", sq.size());
+        pageParams.put("off", sq.page() * sq.size());
+        List<ListingView> items = jdbc.sql(SELECT + where + order + " limit :lim offset :off")
+                .params(pageParams).query(ListingService::map).list();
+        return PageResponse.of(items, sq.page(), sq.size(), total);
+    }
+
+    /** Active listings from other members, used by the helper-matching engine (unpaginated, capped). */
+    public List<ListingView> candidates(long excludeOwnerId) {
+        return jdbc.sql(SELECT + " where l.active = true and u.disabled = false and l.owner_id <> :o"
+                + " order by l.created_at desc limit 300")
+                .param("o", excludeOwnerId)
+                .query(ListingService::map)
+                .list();
     }
 
     public List<ListingView> activeByOwner(long ownerId) {
@@ -97,14 +142,6 @@ public class ListingService {
                 .param("id", id)
                 .update();
         return get(id);
-    }
-
-    /** Active listings from other members, used by the helper-matching engine. */
-    public List<ListingView> candidates(long excludeOwnerId) {
-        return jdbc.sql(SELECT + " where l.active = true and l.owner_id <> :o order by l.created_at desc limit 300")
-                .param("o", excludeOwnerId)
-                .query(ListingService::map)
-                .list();
     }
 
     public List<ListingView> mine(long ownerId) {

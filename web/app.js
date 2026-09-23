@@ -18,6 +18,8 @@ const state = {
   adminPage: 0,
   adminQ: "",
   maxMin: "",
+  minRating: "",
+  browsePage: 0,
   editId: null,
   chatId: null,
   chatTimer: null,
@@ -47,8 +49,8 @@ function toast(msg) {
 }
 
 /* ---------- API with cold-start friendliness (Render free tier sleeps) ---------- */
-async function api(path, { method = "GET", body } = {}) {
-  const headers = { "Content-Type": "application/json" };
+async function api(path, { method = "GET", body, headers: extraHeaders } = {}) {
+  const headers = { "Content-Type": "application/json", ...(extraHeaders || {}) };
   if (state.token) headers.Authorization = "Bearer " + state.token;
   const slow = setTimeout(() => ($("#banner").hidden = false), 2500);
   try {
@@ -203,11 +205,15 @@ async function viewBrowse() {
   if (state.cat) qs.set("category", state.cat);
   if (state.sort) qs.set("sort", state.sort);
   if (state.maxMin) qs.set("maxMinutes", state.maxMin);
-  const [cats, listings, stats] = await Promise.all([
+  if (state.minRating) qs.set("minRating", state.minRating);
+  qs.set("page", state.browsePage);
+  qs.set("size", 12);
+  const [cats, page, stats] = await Promise.all([
     api("/categories"),
     api("/listings?" + qs),
     api("/stats").catch(() => null),
   ]);
+  const listings = page.items;
   app.innerHTML = `
     <section class="hero">
       <h1>Trade skills for hours, not money.</h1>
@@ -226,21 +232,27 @@ async function viewBrowse() {
         <option value="30" ${state.maxMin === "30" ? "selected" : ""}>Up to 30 min</option>
         <option value="60" ${state.maxMin === "60" ? "selected" : ""}>Up to 1 hour</option>
         <option value="120" ${state.maxMin === "120" ? "selected" : ""}>Up to 2 hours</option>
+      </select>
+      <select id="minRating" aria-label="Min rating">
+        <option value="" ${state.minRating === "" ? "selected" : ""}>Any rating</option>
+        <option value="4" ${state.minRating === "4" ? "selected" : ""}>4★ and up</option>
+        <option value="4.5" ${state.minRating === "4.5" ? "selected" : ""}>4.5★ and up</option>
       </select></div>
     <div class="chips">
       <button data-cat="" class="${state.cat === "" ? "on" : ""}">All</button>
       ${cats.map((c) => `<button data-cat="${esc(c.category)}" class="${state.cat === c.category ? "on" : ""}">${esc(c.category)} · ${c.listings}</button>`).join("")}
     </div>
-    ${listings.length ? `<div class="grid">${listings.map(listingCard).join("")}</div>`
-      : `<p class="empty">No skills here yet. Be the first to offer one!</p>`}`;
+    ${listings.length ? `<div class="grid">${listings.map(listingCard).join("")}</div>${pager(page.page, page.totalPages, "browsepage")}`
+      : `<p class="empty">No skills here yet. Try a different filter, or be the first to offer one!</p>`}`;
   const input = $("#q");
   let timer;
   input.addEventListener("input", () => {
     clearTimeout(timer);
-    timer = setTimeout(() => { state.q = input.value.trim(); viewBrowse().catch(showError); }, 350);
+    timer = setTimeout(() => { state.q = input.value.trim(); state.browsePage = 0; viewBrowse().catch(showError); }, 350);
   });
-  $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; viewBrowse().catch(showError); });
-  $("#maxMin").addEventListener("change", (e) => { state.maxMin = e.target.value; viewBrowse().catch(showError); });
+  $("#sort").addEventListener("change", (e) => { state.sort = e.target.value; state.browsePage = 0; viewBrowse().catch(showError); });
+  $("#maxMin").addEventListener("change", (e) => { state.maxMin = e.target.value; state.browsePage = 0; viewBrowse().catch(showError); });
+  $("#minRating").addEventListener("change", (e) => { state.minRating = e.target.value; state.browsePage = 0; viewBrowse().catch(showError); });
   if (state.q) {
     input.focus();
     input.setSelectionRange(input.value.length, input.value.length);
@@ -555,7 +567,7 @@ async function showMatches(id, el) {
 async function viewAdmin() {
   if (!state.user || !["MODERATOR", "ADMIN"].includes(state.user.role)) { app.innerHTML = `<p class="empty">Staff only.</p>`; return; }
   const isAdmin = state.user.role === "ADMIN";
-  const tabs = [["overview", "Overview"], ["reports", "Reports"], ...(isAdmin ? [["users", "Users"], ["audit", "Audit log"]] : [])];
+  const tabs = [["overview", "Overview"], ["reports", "Reports"], ...(isAdmin ? [["users", "Users"], ["audit", "Audit log"], ["ledger", "Ledger"]] : [])];
   if (!tabs.some((t) => t[0] === state.adminTab)) state.adminTab = "overview";
   loading();
   let body = "";
@@ -576,9 +588,15 @@ async function viewAdmin() {
       <div class="list">${r.items.map((u) => `<div class="item"><div><b>${esc(u.displayName)}</b> <span class="muted">${esc(u.email)}</span>${u.disabled ? ` <span class="status s-CANCELLED">SUSPENDED</span>` : ""}</div>
         <div class="row"><select data-role-user="${u.id}" ${u.id === state.user.id ? "disabled" : ""} style="width:auto">${["USER", "MODERATOR", "ADMIN"].map((ro) => `<option ${ro === u.role ? "selected" : ""}>${ro}</option>`).join("")}</select>
         ${u.id === state.user.id ? "" : `<button class="btn ${u.disabled ? "" : "danger"} small" data-action="suspend" data-id="${u.id}" data-value="${!u.disabled}">${u.disabled ? "Reinstate" : "Suspend"}</button>`}</div></div>`).join("")}</div>${pager(r.page, r.totalPages, "adminpage")}`;
-  } else {
+  } else if (state.adminTab === "audit") {
     const r = await api(`/admin/audit?page=${state.adminPage}&size=30`);
     body = `<div class="list">${r.items.map((a) => `<div class="item"><div><b>${esc(a.action)}</b> <span class="muted">${esc(a.entityType || "")} ${a.entityId ?? ""} ${esc(a.detail || "")}</span><br><span class="muted">by ${esc(a.actorName || "system")} · ${when(a.createdAt)}</span></div></div>`).join("") || `<p class="muted">Empty.</p>`}</div>${pager(r.page, r.totalPages, "adminpage")}`;
+  } else {
+    const l = await api("/admin/ledger/verify");
+    body = `<div class="card"><b>${l.ok ? "✅ Ledger is consistent" : "⚠️ Ledger problems found"}</b>
+        <span class="muted">${l.bookingsChecked} bookings checked</span></div>
+      ${l.violations.length ? `<h2 style="margin-top:16px">Violations</h2><div class="list">${l.violations.map((v) => `<div class="item"><span>Booking #${v.bookingId} (${v.status})</span><span class="muted">${esc(v.problem)}</span></div>`).join("")}</div>` : ""}
+      ${l.negativeBalanceUsers.length ? `<h2 style="margin-top:16px">Negative balances</h2><p class="muted">User IDs: ${l.negativeBalanceUsers.join(", ")}</p>` : ""}`;
   }
   app.innerHTML = `<h1>Admin</h1><div class="chips">${tabs.map((t) => `<button data-action="atab" data-tab="${t[0]}" class="${state.adminTab === t[0] ? "on" : ""}">${t[1]}</button>`).join("")}</div>${body}`;
   const search = $("#adminSearch");
@@ -588,6 +606,9 @@ async function viewAdmin() {
 /* ---------- booking + report dialogs ---------- */
 async function openBook(ctx) {
   state.book = ctx;
+  if (ctx.mode === "book") {
+    state.book.idemKey = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random();
+  }
   const book = ctx.mode === "book";
   $("#bookTitle").textContent = book ? `Book "${ctx.title}"` : "Reschedule session";
   $("#bookHint").textContent = book ? `Costs ${dur(ctx.minutes)}, held until the session ends. Picking a time is optional; you can agree one in Messages.` : "The other person will be notified.";
@@ -616,7 +637,11 @@ $("#bookForm").addEventListener("submit", async (e) => {
   btn.disabled = true;
   try {
     if (ctx.mode === "book") {
-      await api("/bookings", { method: "POST", body: { listingId: Number(ctx.listingId), note: f.get("note") || null, scheduledAt: iso } });
+      await api("/bookings", {
+        method: "POST",
+        headers: { "Idempotency-Key": ctx.idemKey },
+        body: { listingId: Number(ctx.listingId), note: f.get("note") || null, scheduledAt: iso },
+      });
       toast("Requested! Your minutes are held until the session ends.");
       $("#bookDlg").close();
       await loadUser();
@@ -700,7 +725,7 @@ $("#chatForm").addEventListener("submit", async (e) => {
 /* ---------- actions (event delegation) ---------- */
 document.addEventListener("click", async (e) => {
   const chip = e.target.closest("[data-cat]");
-  if (chip && app.contains(chip)) { state.cat = chip.dataset.cat; return viewBrowse().catch(showError); }
+  if (chip && app.contains(chip)) { state.cat = chip.dataset.cat; state.browsePage = 0; return viewBrowse().catch(showError); }
 
   const el = e.target.closest("[data-action]");
   if (!el) return;
@@ -723,6 +748,7 @@ document.addEventListener("click", async (e) => {
       case "matches": return showMatches(id, el);
       case "closereq": await api(`/requests/${id}/close`, { method: "POST" }); toast("Request closed"); return viewRequests();
       case "reqpage": state.reqPage = Math.max(0, state.reqPage + Number(el.dataset.dir)); return viewRequests();
+      case "browsepage": state.browsePage = Math.max(0, state.browsePage + Number(el.dataset.dir)); return viewBrowse();
       case "slotrm": state.slots.splice(Number(el.dataset.i), 1); return renderSlots();
       case "atab": state.adminTab = el.dataset.tab; state.adminPage = 0; return viewAdmin();
       case "adminpage": state.adminPage = Math.max(0, state.adminPage + Number(el.dataset.dir)); return viewAdmin();

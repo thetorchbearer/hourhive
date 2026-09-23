@@ -39,6 +39,20 @@ Runs **100% on free tiers** - no credit card required.
 - **RBAC** (USER / MODERATOR / ADMIN), **admin dashboard**, **user & listing reports** with moderation actions, **audit log**
 - First admin: set `ADMIN_BOOTSTRAP_SECRET` on Render, sign in, open *Your profile → Admin access*. Works only while no admin exists.
 
+### Phase 2 (SDE-1 engineering hardening)
+
+- **Idempotency keys**: send an `Idempotency-Key` header on `POST /api/bookings`; a retried/double-clicked request returns the original booking instead of creating a second one
+- **Concurrent booking protection**: the learner's row is locked (`SELECT ... FOR UPDATE`) for the whole request, plus a database unique index (`uq_open_booking`) as a second line of defence against races
+- **Formal booking state machine** (`BookingStatus`): every transition is checked against an explicit allow-list instead of ad hoc string comparisons
+- **Ledger integrity verification**: `GET /api/admin/ledger/verify` (Admin dashboard → Ledger tab) recomputes every booking's expected ledger movement and flags mismatches or negative balances
+- **Global exception handling & standardized errors**: every error is `{status, code, error, message, path, requestId, timestamp}`
+- **Request correlation IDs & structured logging**: every response carries `X-Request-Id`; logs are `key=value` lines tagged with that id
+- **Pagination & sorting everywhere**: `/api/listings` now returns `{items, page, size, total, totalPages}` with `sort=newest|rating|shortest|longest|oldest`
+- **Advanced search & filtering**: `/api/listings` also takes `minMinutes`, `maxMinutes`, `minRating`, `availableDay`
+- **Rate limiting, refined**: scoped separately for auth (20/min/IP), writes (60/min/user), reads (300/min/IP); responses carry `X-RateLimit-*`
+- **JUnit tests**: `BookingStatusTest` (state machine) and `HelperMatcherTest` (matching/scoring) — pure logic, no DB
+- **CI pipeline**: written (see below) but not pushed — see note
+
 ## Deploy (about 10 minutes)
 
 ### 1. Neon (database)

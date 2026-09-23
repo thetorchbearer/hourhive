@@ -23,3 +23,9 @@ hourhive:
   # comma separated list, e.g. https://hourhive.vercel.app
   allowed-origins: ${ALLOWED_ORIGINS:*}
   signup-bonus-minutes: 120
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} level=%-5p requestId=%X{requestId:-none} logger=%logger{30} msg=%m%n"
+  level:
+    access: info

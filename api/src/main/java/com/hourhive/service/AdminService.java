@@ -3,6 +3,8 @@ package com.hourhive.service;
 import com.hourhive.api.Dtos.AdminOverview;
 import com.hourhive.api.Dtos.AdminUserView;
 import com.hourhive.api.Dtos.AuditView;
+import com.hourhive.api.Dtos.LedgerReport;
+import com.hourhive.api.Dtos.LedgerViolation;
 import com.hourhive.api.Dtos.PageResponse;
 import com.hourhive.domain.Role;
 import com.hourhive.error.ApiException;
@@ -129,5 +131,47 @@ public class AdminService {
                         rs.getTimestamp("created_at").toInstant()))
                 .list();
         return PageResponse.of(items, p, s, total);
+    }
+
+    /**
+     * Ledger integrity check. For every booking the learner's net ledger movement must be
+     * -minutes while the booking is open or completed, and 0 once declined or cancelled (refunded);
+     * the provider must have earned exactly +minutes when completed and nothing otherwise.
+     * Also flags any user whose ledger sums to a negative balance, which should never happen.
+     */
+    public LedgerReport verifyLedger() {
+        List<LedgerViolation> violations = new ArrayList<>();
+        int[] checked = {0};
+        jdbc.sql("""
+                select b.id, b.status, b.minutes,
+                       coalesce((select sum(e.delta_minutes) from ledger_entries e
+                                 where e.booking_id = b.id and e.user_id = b.learner_id), 0) as learner_net,
+                       coalesce((select sum(e.delta_minutes) from ledger_entries e
+                                 where e.booking_id = b.id and e.user_id = b.provider_id), 0) as provider_net
+                from bookings b
+                """)
+                .query((rs, n) -> {
+                    checked[0]++;
+                    String status = rs.getString("status");
+                    long minutes = rs.getLong("minutes");
+                    long learnerNet = rs.getLong("learner_net");
+                    long providerNet = rs.getLong("provider_net");
+                    boolean refunded = status.equals("DECLINED") || status.equals("CANCELLED");
+                    long expectedLearner = refunded ? 0 : -minutes;
+                    long expectedProvider = status.equals("COMPLETED") ? minutes : 0;
+                    if (learnerNet != expectedLearner) {
+                        violations.add(new LedgerViolation(rs.getLong("id"), status,
+                                "learner net " + learnerNet + " but expected " + expectedLearner));
+                    }
+                    if (providerNet != expectedProvider) {
+                        violations.add(new LedgerViolation(rs.getLong("id"), status,
+                                "provider net " + providerNet + " but expected " + expectedProvider));
+                    }
+                    return 0;
+                }).list();
+        List<Long> negative = jdbc.sql("""
+                select user_id from ledger_entries group by user_id having sum(delta_minutes) < 0 order by user_id
+                """).query(Long.class).list();
+        return new LedgerReport(violations.isEmpty() && negative.isEmpty(), checked[0], violations, negative);
     }
 }
